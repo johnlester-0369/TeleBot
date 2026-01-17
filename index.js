@@ -37,11 +37,19 @@ async function main() {
   console.log("Starting bot...");
   // Register commands for Telegram UI
   await bot.telegram.setMyCommands(commands);
-  console.log("Bot commands registered:", commands.map(c => c.command).join(", "));
+  console.log(
+    "Bot commands registered:",
+    commands.map((c) => c.command).join(", "),
+  );
 
   // /start handler
   bot.start(async (ctx) => {
-    await ctx.reply(`Welcome, ${ctx.from.first_name}! Use /help to see available commands.`);
+    await ctx.reply(
+      `Welcome, ${ctx.from.first_name}! Use /help to see available commands.`,
+      {
+        reply_to_message_id: ctx.message.message_id,
+      },
+    );
   });
 
   // /help handler
@@ -49,7 +57,10 @@ async function main() {
     await ctx.reply(
       `List of all commands:\n${commands
         .map((cmd) => `/${cmd.command} - ${cmd.description}`)
-        .join("\n")}`
+        .join("\n")}`,
+      {
+        reply_to_message_id: ctx.message.message_id,
+      },
     );
   });
 
@@ -57,9 +68,14 @@ async function main() {
   bot.command("uid", async (ctx) => {
     const userId = ctx.from.id;
     const firstName = ctx.from.first_name;
-    const username = ctx.from.username ? `@${ctx.from.username}` : "(no username)";
+    const username = ctx.from.username
+      ? `@${ctx.from.username}`
+      : "(no username)";
     await ctx.reply(
-      `Your Telegram info:\nID: ${userId}\nName: ${firstName}\nUsername: ${username}`
+      `Your Telegram info:\nID: ${userId}\nName: ${firstName}\nUsername: ${username}`,
+      {
+        reply_to_message_id: ctx.message.message_id,
+      },
     );
   });
 
@@ -80,10 +96,14 @@ async function main() {
         `• Date: ${time}`,
       ].join("\n");
 
-      await ctx.reply(systemInfo);
+      await ctx.reply(systemInfo, {
+        reply_to_message_id: ctx.message.message_id,
+      });
     } catch (error) {
       console.error("Error in /system command:", error);
-      await ctx.reply("An error occurred while fetching system information.");
+      await ctx.reply("An error occurred while fetching system information.", {
+        reply_to_message_id: ctx.message.message_id,
+      });
     }
   });
 
