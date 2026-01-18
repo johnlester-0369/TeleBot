@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { Telegraf } from "telegraf";
+import { Telegraf, Input } from "telegraf";
 import moment from "moment-timezone";
 import qr from "qr-image";
 import axios from "axios";
@@ -14,6 +14,7 @@ const defaultCommands = [
   { command: "system", description: "View bot system information" },
   { command: "qr", description: "Generate QR code from text" },
   { command: "trans", description: "Translate text to another language" },
+  { command: "say", description: "Convert text to speech audio" },
 ];
 
 // Commands only for group chats
@@ -275,10 +276,43 @@ async function translateText(text, targetLang, sourceLang = "auto") {
 }
 
 /**
- * Parses translation command arguments
+ * Generates text-to-speech audio using Google Translate TTS API
+ * @param {string} text - Text to convert to speech
+ * @param {string} lang - Language code for speech (e.g., 'en', 'ko', 'ja')
+ * @returns {Promise<Buffer>} Audio buffer (MP3 format)
+ * @throws {Error} If TTS generation fails
+ */
+async function generateTTSAudio(text, lang) {
+  const url = "https://translate.google.com/translate_tts";
+
+  const response = await axios.get(url, {
+    params: {
+      ie: "UTF-8",
+      q: text,
+      tl: lang.toLowerCase(),
+      client: "tw-ob",
+    },
+    responseType: "arraybuffer",
+    timeout: 15000, // 15 second timeout
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      Referer: "https://translate.google.com/",
+    },
+  });
+
+  if (!response.data || response.data.byteLength === 0) {
+    throw new Error("Empty audio response from TTS service");
+  }
+
+  return Buffer.from(response.data);
+}
+
+/**
+ * Parses translation/say command arguments
  * Supports formats:
- * - /trans <text> -> <lang>
- * - /trans -> <lang> (when replying to a message)
+ * - /trans <text> | <lang>
+ * - /trans | <lang> (when replying to a message)
  * - /trans <text> (defaults to English)
  * @param {string} args - Command arguments
  * @returns {{text: string|null, targetLang: string}} Parsed arguments
@@ -286,25 +320,44 @@ async function translateText(text, targetLang, sourceLang = "auto") {
 function parseTransArgs(args) {
   const defaultLang = "en";
 
-  // Check for "-> lang" pattern
-  const arrowMatch = args.match(/^(.*?)\s*->\s*(\w+)\s*$/);
+  // Check for "| lang" pattern (pipe separator)
+  const pipeMatch = args.match(/^(.*?)\s*\|\s*(\w+)\s*$/);
 
-  if (arrowMatch) {
-    const text = arrowMatch[1].trim() || null;
-    const targetLang = arrowMatch[2].trim();
-    return { text, targetLang };
-  }
-
-  // No arrow, check if first word is a language code
-  const words = args.trim().split(/\s+/);
-  if (words.length >= 1 && words[0].length <= 5 && isValidLanguage(words[0])) {
-    // First word is a valid language code
-    const targetLang = words[0];
-    const text = words.slice(1).join(" ") || null;
+  if (pipeMatch) {
+    const text = pipeMatch[1].trim() || null;
+    const targetLang = pipeMatch[2].trim();
     return { text, targetLang };
   }
 
   // Default: entire args is text, translate to English
+  return {
+    text: args.trim() || null,
+    targetLang: defaultLang,
+  };
+}
+
+/**
+ * Parses say command arguments
+ * Supports formats:
+ * - /say <text> | <lang>
+ * - /say | <lang> (when replying to a message)
+ * - /say <text> (defaults to English)
+ * @param {string} args - Command arguments
+ * @returns {{text: string|null, targetLang: string}} Parsed arguments
+ */
+function parseSayArgs(args) {
+  const defaultLang = "en";
+
+  // Check for "| lang" pattern (pipe separator)
+  const pipeMatch = args.match(/^(.*?)\s*\|\s*(\w+)\s*$/);
+
+  if (pipeMatch) {
+    const text = pipeMatch[1].trim() || null;
+    const targetLang = pipeMatch[2].trim();
+    return { text, targetLang };
+  }
+
+  // Default: entire args is text, speak in English
   return {
     text: args.trim() || null,
     targetLang: defaultLang,
@@ -505,11 +558,10 @@ async function main() {
   /**
    * Translates text using Google Translate.
    * Usage:
-   *   /trans <text> -> <lang>  - Translate text to specified language
-   *   /trans <lang> <text>     - Translate text to specified language
-   *   /trans <text>            - Translate text to English (default)
-   *   /trans -> <lang>         - Translate replied message to specified language
-   *   /trans                   - Translate replied message to English
+   *   /trans <text> | <lang>  - Translate text to specified language
+   *   /trans <text>           - Translate text to English (default)
+   *   /trans | <lang>         - Translate replied message to specified language
+   *   /trans                  - Translate replied message to English
    * Supported languages: en, ko, ja, vi, zh, fr, de, es, ru, ar, etc.
    * @param {object} ctx - Telegraf context object
    */
@@ -534,16 +586,15 @@ async function main() {
         const usageMessage = [
           "🌐 *Translation Command Usage:*",
           "",
-          "• `/trans <text> -> <lang>` - Translate to specified language",
-          "• `/trans <lang> <text>` - Translate to specified language",
+          "• `/trans <text> | <lang>` - Translate to specified language",
           "• `/trans <text>` - Translate to English",
-          "• Reply to a message with `/trans -> <lang>` - Translate replied message",
+          "• Reply to a message with `/trans | <lang>` - Translate replied message",
           "• Reply to a message with `/trans` - Translate to English",
           "",
           "*Examples:*",
-          "• `/trans Hello world -> ko`",
-          "• `/trans ja こんにちは`",
-          "• `/trans Bonjour`",
+          "• `/trans Hello world | ko`",
+          "• `/trans Bonjour | ja`",
+          "• `/trans こんにちは`",
           "",
           "*Common language codes:*",
           "`en` English | `ko` Korean | `ja` Japanese",
@@ -644,6 +695,152 @@ async function main() {
       } else if (error.message?.includes("Invalid response")) {
         errorMessage =
           "⚠️ Could not parse translation response. Please try again.";
+      }
+
+      await ctx.reply(errorMessage, {
+        reply_to_message_id: ctx.message.message_id,
+      });
+    }
+  });
+
+  // /say handler - converts text to speech audio
+  /**
+   * Converts text to speech using Google TTS.
+   * Usage:
+   *   /say <text> | <lang>  - Speak text in specified language
+   *   /say <text>           - Speak text in English (default)
+   *   /say | <lang>         - Speak replied message in specified language
+   *   /say                  - Speak replied message in English
+   * Supported languages: en, ko, ja, vi, zh, fr, de, es, ru, ar, etc.
+   * @param {object} ctx - Telegraf context object
+   */
+  bot.command("say", async (ctx) => {
+    try {
+      const args = getCommandArgs(ctx);
+      const { text: parsedText, targetLang } = parseSayArgs(args);
+
+      // Determine the text to speak
+      let textToSpeak = parsedText;
+
+      // If no text provided, check for reply message
+      if (!textToSpeak && ctx.message.reply_to_message) {
+        textToSpeak =
+          ctx.message.reply_to_message.text ||
+          ctx.message.reply_to_message.caption ||
+          null;
+      }
+
+      // Validate: text must be provided
+      if (!textToSpeak) {
+        const usageMessage = [
+          "🔊 *Text-to-Speech Command Usage:*",
+          "",
+          "• `/say <text> | <lang>` - Speak in specified language",
+          "• `/say <text>` - Speak in English",
+          "• Reply to a message with `/say | <lang>` - Speak replied message",
+          "• Reply to a message with `/say` - Speak in English",
+          "",
+          "*Examples:*",
+          "• `/say Hello world | en`",
+          "• `/say 안녕하세요 | ko`",
+          "• `/say Bonjour | fr`",
+          "",
+          "*Common language codes:*",
+          "`en` English | `ko` Korean | `ja` Japanese",
+          "`zh` Chinese | `vi` Vietnamese | `th` Thai",
+          "`fr` French | `de` German | `es` Spanish",
+          "`ru` Russian | `ar` Arabic | `hi` Hindi",
+        ].join("\n");
+
+        await ctx.reply(usageMessage, {
+          reply_to_message_id: ctx.message.message_id,
+          parse_mode: "Markdown",
+        });
+        return;
+      }
+
+      // Validate: target language
+      if (!isValidLanguage(targetLang)) {
+        await ctx.reply(
+          `⚠️ Unknown language code: "${targetLang}"\n\nCommon codes: en, ko, ja, zh, vi, fr, de, es, ru, ar, hi, th, fil`,
+          {
+            reply_to_message_id: ctx.message.message_id,
+          },
+        );
+        return;
+      }
+
+      // Validate: text length (Google TTS has practical limits)
+      // TTS typically works best with shorter texts
+      const maxLength = 200;
+      if (textToSpeak.length > maxLength) {
+        await ctx.reply(
+          `⚠️ Text is too long for speech. Maximum length is ${maxLength} characters.\nYour text: ${textToSpeak.length} characters.\n\n💡 Tip: Try breaking your text into smaller parts.`,
+          {
+            reply_to_message_id: ctx.message.message_id,
+          },
+        );
+        return;
+      }
+
+      // Send "generating..." indicator
+      const statusMessage = await ctx.reply("🔄 Generating audio...", {
+        reply_to_message_id: ctx.message.message_id,
+      });
+
+      // Generate TTS audio
+      const audioBuffer = await generateTTSAudio(textToSpeak, targetLang);
+
+      // Delete status message
+      try {
+        await ctx.deleteMessage(statusMessage.message_id);
+      } catch {
+        // Ignore deletion errors
+      }
+
+      // Get language name for caption
+      const langName = getLanguageName(targetLang);
+
+      // Prepare caption (truncate if text is too long for display)
+      const displayText =
+        textToSpeak.length > 80
+          ? `${textToSpeak.substring(0, 80)}...`
+          : textToSpeak;
+
+      // Send the audio as voice message using Input.fromBuffer
+      await ctx.replyWithVoice(
+        Input.fromBuffer(audioBuffer, `tts_${Date.now()}.mp3`),
+        {
+          caption: `🔊 "${displayText}"\n_${langName}_`,
+          parse_mode: "Markdown",
+          reply_to_message_id: ctx.message.message_id,
+        },
+      );
+
+      console.log(
+        `TTS generated for "${textToSpeak.substring(0, 30)}${textToSpeak.length > 30 ? "..." : ""}" (${targetLang}) by @${ctx.from.username || ctx.from.id}`,
+      );
+    } catch (error) {
+      console.error("Error in /say command:", error);
+
+      // Handle specific errors
+      let errorMessage = "❌ An error occurred while generating speech.";
+
+      if (error.code === "ECONNABORTED" || error.code === "ETIMEDOUT") {
+        errorMessage =
+          "⚠️ TTS request timed out. Please try again later.";
+      } else if (error.response?.status === 429) {
+        errorMessage =
+          "⚠️ Too many TTS requests. Please wait a moment and try again.";
+      } else if (error.response?.status === 403) {
+        errorMessage =
+          "⚠️ TTS service access denied. Please try again later.";
+      } else if (error.response?.status >= 500) {
+        errorMessage =
+          "⚠️ TTS service is temporarily unavailable. Please try again later.";
+      } else if (error.message?.includes("Empty audio")) {
+        errorMessage =
+          "⚠️ Could not generate audio for this text. Try different text or language.";
       }
 
       await ctx.reply(errorMessage, {
