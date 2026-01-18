@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { Telegraf, Input } from "telegraf";
+import { message } from "telegraf/filters";
 import moment from "moment-timezone";
 import qr from "qr-image";
 import axios from "axios";
@@ -183,6 +184,8 @@ function formatMemory(bytes) {
  */
 function getUpdateType(ctx) {
   if (ctx.message?.text?.startsWith("/")) return "command";
+  if (ctx.message?.new_chat_members) return "new_chat_members";
+  if (ctx.message?.left_chat_member) return "left_chat_member";
   if (ctx.message?.text) return "text";
   if (ctx.message?.sticker) return "sticker";
   if (ctx.message?.photo) return "photo";
@@ -364,6 +367,36 @@ function parseSayArgs(args) {
   };
 }
 
+/**
+ * Formats user display name from Telegram user object
+ * @param {object} user - Telegram user object
+ * @returns {string} Formatted display name
+ */
+function formatUserDisplayName(user) {
+  if (!user) return "Unknown User";
+  
+  let name = user.first_name || "";
+  if (user.last_name) {
+    name += ` ${user.last_name}`;
+  }
+  return name.trim() || "Unknown User";
+}
+
+/**
+ * Formats user mention with optional username
+ * @param {object} user - Telegram user object
+ * @returns {string} Formatted user mention string
+ */
+function formatUserMention(user) {
+  if (!user) return "Unknown User";
+  
+  const displayName = formatUserDisplayName(user);
+  if (user.username) {
+    return `${displayName} (@${user.username})`;
+  }
+  return displayName;
+}
+
 async function main() {
   console.log("Starting bot...");
 
@@ -411,6 +444,77 @@ async function main() {
     "Group chat commands registered:",
     groupCommands.map((c) => c.command).join(", "),
   );
+
+  // ============================================================
+  // MEMBER JOIN/LEAVE HANDLERS
+  // Must be registered BEFORE generic message handlers
+  // ============================================================
+
+  /**
+   * Handler for new chat members joining a group
+   * Sends a welcome message when users join the group
+   * @param {object} ctx - Telegraf context object with new_chat_members
+   */
+  bot.on(message("new_chat_members"), async (ctx) => {
+    try {
+      const newMembers = ctx.message.new_chat_members;
+      const chatTitle = ctx.chat.title || "this group";
+
+      for (const member of newMembers) {
+        // Skip if the new member is a bot (optional: you can remove this check if you want to greet bots too)
+        if (member.is_bot) {
+          console.log(`Bot ${member.first_name} (${member.id}) joined ${chatTitle}`);
+          continue;
+        }
+
+        const displayName = formatUserDisplayName(member);
+        const welcomeMessage = [
+          `👋 Welcome to *${chatTitle}*, ${displayName}!`,
+          ``,
+          `We're glad to have you here. Feel free to introduce yourself and enjoy your stay!`,
+          ``,
+          `💡 Type /help to see available commands.`,
+        ].join("\n");
+
+        await ctx.reply(welcomeMessage, {
+          parse_mode: "Markdown",
+        });
+
+        console.log(`New member: ${formatUserMention(member)} joined "${chatTitle}" (chat ${ctx.chat.id})`);
+      }
+    } catch (error) {
+      console.error("Error in new_chat_members handler:", error);
+      // Don't send error message to chat to avoid spam
+    }
+  });
+
+  /**
+   * Handler for chat members leaving a group
+   * Sends a farewell message when users leave the group
+   * @param {object} ctx - Telegraf context object with left_chat_member
+   */
+  bot.on(message("left_chat_member"), async (ctx) => {
+    try {
+      const leftMember = ctx.message.left_chat_member;
+      const chatTitle = ctx.chat.title || "the group";
+
+      // Skip if the member who left is a bot (optional: you can remove this check if you want to announce bot departures)
+      if (leftMember.is_bot) {
+        console.log(`Bot ${leftMember.first_name} (${leftMember.id}) left ${chatTitle}`);
+        return;
+      }
+
+      const displayName = formatUserDisplayName(leftMember);
+      const farewellMessage = `👋 Goodbye, ${displayName}! We hope to see you again soon.`;
+
+      await ctx.reply(farewellMessage);
+
+      console.log(`Member left: ${formatUserMention(leftMember)} left "${chatTitle}" (chat ${ctx.chat.id})`);
+    } catch (error) {
+      console.error("Error in left_chat_member handler:", error);
+      // Don't send error message to chat to avoid spam
+    }
+  });
 
   // /start handler
   bot.start(async (ctx) => {
