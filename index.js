@@ -4,12 +4,40 @@ import moment from "moment-timezone";
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-const commands = [
+// Commands for all chats (private + group)
+const defaultCommands = [
   { command: "start", description: "Start bot" },
   { command: "help", description: "How to use the bot" },
   { command: "uid", description: "Get your Telegram user ID" },
   { command: "system", description: "View bot system information" },
 ];
+
+// Commands only for group chats
+const groupCommands = [
+  ...defaultCommands,
+  { command: "setgroupname", description: "Set group name (admin only)" },
+];
+
+/**
+ * Checks if the current chat is a group or supergroup
+ * @param {object} ctx - Telegraf context object
+ * @returns {boolean} True if chat is a group or supergroup
+ */
+function isGroupChat(ctx) {
+  const chatType = ctx.chat?.type;
+  return chatType === "group" || chatType === "supergroup";
+}
+
+/**
+ * Extracts the command argument text from message
+ * @param {object} ctx - Telegraf context object
+ * @returns {string} The text after the command, trimmed
+ */
+function getCommandArgs(ctx) {
+  const text = ctx.message?.text || "";
+  const match = text.match(/^\/\w+(?:@\w+)?\s*(.*)/);
+  return match ? match[1].trim() : "";
+}
 
 /**
  * Formats uptime seconds into human-readable string (Xh Xm Xs)
@@ -35,11 +63,23 @@ function formatMemory(bytes) {
 
 async function main() {
   console.log("Starting bot...");
-  // Register commands for Telegram UI
-  await bot.telegram.setMyCommands(commands);
+
+  // Register default commands for private chats
+  await bot.telegram.setMyCommands(defaultCommands, {
+    scope: { type: "all_private_chats" },
+  });
   console.log(
-    "Bot commands registered:",
-    commands.map((c) => c.command).join(", "),
+    "Private chat commands registered:",
+    defaultCommands.map((c) => c.command).join(", "),
+  );
+
+  // Register commands including setgroupname for group chats only
+  await bot.telegram.setMyCommands(groupCommands, {
+    scope: { type: "all_group_chats" },
+  });
+  console.log(
+    "Group chat commands registered:",
+    groupCommands.map((c) => c.command).join(", "),
   );
 
   // /start handler
@@ -54,8 +94,10 @@ async function main() {
 
   // /help handler
   bot.help(async (ctx) => {
+    // Show different commands based on chat type
+    const commandsToShow = isGroupChat(ctx) ? groupCommands : defaultCommands;
     await ctx.reply(
-      `List of all commands:\n${commands
+      `List of all commands:\n${commandsToShow
         .map((cmd) => `/${cmd.command} - ${cmd.description}`)
         .join("\n")}`,
       {
@@ -102,6 +144,83 @@ async function main() {
     } catch (error) {
       console.error("Error in /system command:", error);
       await ctx.reply("An error occurred while fetching system information.", {
+        reply_to_message_id: ctx.message.message_id,
+      });
+    }
+  });
+
+  // /setgroupname handler - changes the group name (admin only, group chats only)
+  bot.command("setgroupname", async (ctx) => {
+    try {
+      // Validate: only works in group chats
+      if (!isGroupChat(ctx)) {
+        await ctx.reply(
+          "⚠️ This command can only be used in group or supergroup chats.",
+          {
+            reply_to_message_id: ctx.message.message_id,
+          },
+        );
+        return;
+      }
+
+      // Get the new group name from command arguments
+      const newName = getCommandArgs(ctx);
+
+      // Validate: new name must be provided
+      if (!newName) {
+        await ctx.reply(
+          "⚠️ Please provide a new group name.\nUsage: /setgroupname <new name>\nExample: /setgroupname My Awesome Group",
+          {
+            reply_to_message_id: ctx.message.message_id,
+          },
+        );
+        return;
+      }
+
+      // Validate: Telegram group titles must be 1-128 characters
+      if (newName.length > 128) {
+        await ctx.reply(
+          "⚠️ Group name is too long. Maximum length is 128 characters.",
+          {
+            reply_to_message_id: ctx.message.message_id,
+          },
+        );
+        return;
+      }
+
+      // Attempt to change the group title
+      await ctx.setChatTitle(newName);
+
+      await ctx.reply(`✅ Group name has been changed to: "${newName}"`, {
+        reply_to_message_id: ctx.message.message_id,
+      });
+
+      console.log(
+        `Group name changed to "${newName}" by @${ctx.from.username || ctx.from.id} in chat ${ctx.chat.id}`,
+      );
+    } catch (error) {
+      console.error("Error in /setgroupname command:", error);
+
+      // Handle specific Telegram API errors
+      let errorMessage = "An error occurred while changing the group name.";
+
+      if (error.description) {
+        if (error.description.includes("not enough rights")) {
+          errorMessage =
+            "⚠️ I don't have permission to change the group name. Please make me an admin with 'Change Group Info' permission.";
+        } else if (error.description.includes("CHAT_TITLE_NOT_MODIFIED")) {
+          errorMessage = "⚠️ The group name is already set to this value.";
+        } else if (
+          error.description.includes("CHAT_NOT_MODIFIED") ||
+          error.description.includes("chat title is not modified")
+        ) {
+          errorMessage = "⚠️ The group name is already set to this value.";
+        } else {
+          errorMessage = `⚠️ Failed to change group name: ${error.description}`;
+        }
+      }
+
+      await ctx.reply(errorMessage, {
         reply_to_message_id: ctx.message.message_id,
       });
     }
