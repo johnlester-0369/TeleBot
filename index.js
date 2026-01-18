@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { Telegraf } from "telegraf";
 import moment from "moment-timezone";
+import qr from "qr-image";
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
@@ -10,6 +11,7 @@ const defaultCommands = [
   { command: "help", description: "How to use the bot" },
   { command: "uid", description: "Get your Telegram user ID" },
   { command: "system", description: "View bot system information" },
+  { command: "qr", description: "Generate QR code from text" },
 ];
 
 // Commands only for group chats
@@ -79,6 +81,15 @@ function getUpdateType(ctx) {
   if (ctx.inlineQuery) return "inline_query";
   if (ctx.message) return "message";
   return "update";
+}
+
+/**
+ * Generates a QR code image stream from text
+ * @param {string} text - Text to encode in QR code
+ * @returns {import('stream').Readable} PNG image stream
+ */
+function generateQRCode(text) {
+  return qr.image(text, { type: "png" });
 }
 
 async function main() {
@@ -191,6 +202,81 @@ async function main() {
     } catch (error) {
       console.error("Error in /system command:", error);
       await ctx.reply("An error occurred while fetching system information.", {
+        reply_to_message_id: ctx.message.message_id,
+      });
+    }
+  });
+
+  // /qr handler - generates QR code from provided text
+  /**
+   * Generates and sends a QR code image from user-provided text.
+   * Usage: /qr <text to encode>
+   * @param {object} ctx - Telegraf context object
+   */
+  bot.command("qr", async (ctx) => {
+    try {
+      // Get the text to encode from command arguments
+      const textToEncode = getCommandArgs(ctx);
+
+      // Validate: text must be provided
+      if (!textToEncode) {
+        await ctx.reply(
+          "⚠️ Please provide text to generate a QR code.\nUsage: /qr <text>\nExample: /qr https://example.com",
+          {
+            reply_to_message_id: ctx.message.message_id,
+          },
+        );
+        return;
+      }
+
+      // Validate: text length (QR codes have practical limits)
+      // QR Code version 40 can hold up to ~4,296 alphanumeric characters
+      // Using 2000 as a reasonable limit for most use cases
+      const maxLength = 2000;
+      if (textToEncode.length > maxLength) {
+        await ctx.reply(
+          `⚠️ Text is too long. Maximum length is ${maxLength} characters.\nYour text: ${textToEncode.length} characters.`,
+          {
+            reply_to_message_id: ctx.message.message_id,
+          },
+        );
+        return;
+      }
+
+      // Generate QR code as PNG stream
+      const qrStream = generateQRCode(textToEncode);
+
+      // Prepare caption (truncate if text is too long for display)
+      const displayText =
+        textToEncode.length > 100
+          ? `${textToEncode.substring(0, 100)}...`
+          : textToEncode;
+      const caption = `📱 QR Code for:\n${displayText}`;
+
+      // Send the QR code image as a photo
+      await ctx.replyWithPhoto(
+        { source: qrStream },
+        {
+          caption: caption,
+          reply_to_message_id: ctx.message.message_id,
+        },
+      );
+
+      console.log(
+        `QR code generated for "${textToEncode.substring(0, 50)}${textToEncode.length > 50 ? "..." : ""}" by @${ctx.from.username || ctx.from.id}`,
+      );
+    } catch (error) {
+      console.error("Error in /qr command:", error);
+
+      // Handle specific errors
+      let errorMessage = "❌ An error occurred while generating the QR code.";
+
+      if (error.message?.includes("too long")) {
+        errorMessage =
+          "⚠️ The text is too long to encode in a QR code. Please use shorter text.";
+      }
+
+      await ctx.reply(errorMessage, {
         reply_to_message_id: ctx.message.message_id,
       });
     }
