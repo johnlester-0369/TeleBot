@@ -61,8 +61,55 @@ function formatMemory(bytes) {
   return `${megabytes.toFixed(1)} MB`;
 }
 
+/**
+ * Determines the update type for logging purposes
+ * @param {object} ctx - Telegraf context object
+ * @returns {string} Human-readable update type
+ */
+function getUpdateType(ctx) {
+  if (ctx.message?.text?.startsWith("/")) return "command";
+  if (ctx.message?.text) return "text";
+  if (ctx.message?.sticker) return "sticker";
+  if (ctx.message?.photo) return "photo";
+  if (ctx.message?.video) return "video";
+  if (ctx.message?.document) return "document";
+  if (ctx.message?.voice) return "voice";
+  if (ctx.message?.audio) return "audio";
+  if (ctx.callbackQuery) return "callback_query";
+  if (ctx.inlineQuery) return "inline_query";
+  if (ctx.message) return "message";
+  return "update";
+}
+
 async function main() {
   console.log("Starting bot...");
+
+  // ============================================================
+  // LOGGING MIDDLEWARE - Runs for ALL updates (including commands)
+  // Must be registered BEFORE command handlers to intercept all updates
+  // ============================================================
+  /**
+   * Universal logging middleware that logs all incoming updates.
+   * Uses next() to pass control to subsequent handlers.
+   * @param {object} ctx - Telegraf context object
+   * @param {Function} next - Function to call next middleware
+   */
+  bot.use(async (ctx, next) => {
+    try {
+      const from = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.id ?? "unknown";
+      const updateType = getUpdateType(ctx);
+      const content = ctx.message?.text || ctx.callbackQuery?.data || `<${updateType}>`;
+
+      console.log(`[${updateType.toUpperCase()}] from ${from}: ${content}`);
+
+      // CRITICAL: Call next() to pass control to command handlers
+      await next();
+    } catch (error) {
+      console.error("Error in logging middleware:", error);
+      // Still call next() to not break the chain
+      await next();
+    }
+  });
 
   // Register default commands for private chats
   await bot.telegram.setMyCommands(defaultCommands, {
@@ -226,12 +273,9 @@ async function main() {
     }
   });
 
-  // --- Single logger for all messages ---
-  bot.on("message", (ctx) => {
-    const from = ctx.from.username ? `@${ctx.from.username}` : ctx.from.id;
-    const text = ctx.message.text || "<non-text message>";
-    console.log(`Received message from ${from}: ${text}`);
-  });
+  // NOTE: The old bot.on("message") handler has been REMOVED.
+  // Logging is now handled by the bot.use() middleware above,
+  // which runs for ALL updates including commands.
 
   // Launch bot
   await bot.launch();
