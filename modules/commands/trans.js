@@ -1,6 +1,6 @@
 /**
  * Translation command module
- * Translates text using Google Translate API
+ * Translates text using Google Translate API with language quick-select buttons
  */
 
 import axios from "axios";
@@ -116,6 +116,24 @@ const SUPPORTED_LANGUAGES = {
 };
 
 /**
+ * Popular languages for quick selection
+ */
+const POPULAR_LANGUAGES = [
+  { code: "en", name: "English", flag: "🇬🇧" },
+  { code: "ko", name: "Korean", flag: "🇰🇷" },
+  { code: "ja", name: "Japanese", flag: "🇯🇵" },
+  { code: "zh", name: "Chinese", flag: "🇨🇳" },
+  { code: "es", name: "Spanish", flag: "🇪🇸" },
+  { code: "fr", name: "French", flag: "🇫🇷" },
+  { code: "de", name: "German", flag: "🇩🇪" },
+  { code: "ru", name: "Russian", flag: "🇷🇺" },
+  { code: "ar", name: "Arabic", flag: "🇸🇦" },
+  { code: "hi", name: "Hindi", flag: "🇮🇳" },
+  { code: "pt", name: "Portuguese", flag: "🇵🇹" },
+  { code: "vi", name: "Vietnamese", flag: "🇻🇳" },
+];
+
+/**
  * Validates if a language code is supported
  * @param {string} langCode - Language code to validate
  * @returns {boolean} True if language code is supported
@@ -206,6 +224,28 @@ function parseTransArgs(args) {
   };
 }
 
+/**
+ * Builds language selection keyboard
+ * @param {string} textToTranslate - Text to be translated (for callback data)
+ * @returns {object} Inline keyboard markup
+ */
+function buildLanguageKeyboard(textToTranslate) {
+  // Store text in first 50 chars for callback (Telegram limits callback_data to 64 bytes)
+  const textPreview = textToTranslate.substring(0, 30);
+  const rows = [];
+
+  // Split popular languages into rows of 3
+  for (let i = 0; i < POPULAR_LANGUAGES.length; i += 3) {
+    const row = POPULAR_LANGUAGES.slice(i, i + 3).map((lang) => ({
+      text: `${lang.flag} ${lang.code.toUpperCase()}`,
+      callback_data: `trans_${lang.code}`,
+    }));
+    rows.push(row);
+  }
+
+  return { inline_keyboard: rows };
+}
+
 export const config = {
   name: "trans",
   description: "Translate text to another language",
@@ -218,8 +258,9 @@ export const config = {
  * @param {object} params - Command parameters
  * @param {object} params.ctx - Telegraf context object
  * @param {string} params.args - Command arguments
+ * @param {object} params.Markup - Telegraf Markup utility
  */
-export const onStart = async ({ ctx, args }) => {
+export const onStart = async ({ ctx, args, Markup }) => {
   try {
     const { text: parsedText, targetLang } = parseTransArgs(args);
 
@@ -237,28 +278,45 @@ export const onStart = async ({ ctx, args }) => {
     // Validate: text must be provided
     if (!textToTranslate) {
       const usageMessage = [
-        "🌐 *Translation Command Usage:*",
+        "🌐 *Translation Command*",
         "",
+        "*Usage:*",
         "• `/trans <text> | <lang>` - Translate to specified language",
         "• `/trans <text>` - Translate to English",
-        "• Reply to a message with `/trans | <lang>` - Translate replied message",
-        "• Reply to a message with `/trans` - Translate to English",
+        "• Reply to a message with `/trans | <lang>`",
         "",
         "*Examples:*",
         "• `/trans Hello world | ko`",
         "• `/trans Bonjour | ja`",
-        "• `/trans こんにちは`",
         "",
-        "*Common language codes:*",
-        "`en` English | `ko` Korean | `ja` Japanese",
-        "`zh` Chinese | `vi` Vietnamese | `th` Thai",
-        "`fr` French | `de` German | `es` Spanish",
-        "`ru` Russian | `ar` Arabic | `hi` Hindi",
+        "*Quick translate:* Type your text and select a language below!",
       ].join("\n");
 
       await ctx.reply(usageMessage, {
         reply_to_message_id: ctx.message.message_id,
         parse_mode: "Markdown",
+      });
+      return;
+    }
+
+    // Store text for quick language selection buttons
+    // If no target lang specified, show language picker
+    if (args && !args.includes("|")) {
+      const selectMessage = [
+        `🌐 *Select Target Language*`,
+        ``,
+        `📝 Text: "${textToTranslate.length > 50 ? textToTranslate.substring(0, 50) + "..." : textToTranslate}"`,
+        ``,
+        `_Choose a language to translate to:_`,
+      ].join("\n");
+
+      // Store the text in session or use inline approach
+      // For simplicity, we'll perform the translation when button is clicked
+      // by using the reply message
+      await ctx.reply(selectMessage, {
+        reply_to_message_id: ctx.message.message_id,
+        parse_mode: "Markdown",
+        reply_markup: buildLanguageKeyboard(textToTranslate),
       });
       return;
     }
@@ -321,9 +379,20 @@ export const onStart = async ({ ctx, args }) => {
       `_${sourceLangName} → ${targetLangName}_`,
     ].join("\n");
 
+    // Add translate to another language buttons
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback("🇬🇧 EN", `trans_quick_en`),
+        Markup.button.callback("🇰🇷 KO", `trans_quick_ko`),
+        Markup.button.callback("🇯🇵 JA", `trans_quick_ja`),
+        Markup.button.callback("🇨🇳 ZH", `trans_quick_zh`),
+      ],
+    ]);
+
     await ctx.reply(responseMessage, {
       reply_to_message_id: ctx.message.message_id,
       parse_mode: "Markdown",
+      ...keyboard,
     });
 
     console.log(
@@ -352,4 +421,111 @@ export const onStart = async ({ ctx, args }) => {
       reply_to_message_id: ctx.message.message_id,
     });
   }
+};
+
+/**
+ * Callback action handlers for translation language buttons
+ */
+export const actions = {
+  // Handle language selection from picker
+  "/trans_(en|ko|ja|zh|es|fr|de|ru|ar|hi|pt|vi)/": async ({ ctx }) => {
+    const targetLang = ctx.match[1];
+    
+    // Get the original message that triggered this
+    const originalMessage = ctx.callbackQuery.message.reply_to_message;
+    if (!originalMessage?.text) {
+      await ctx.editMessageText("⚠️ Could not find the original text to translate. Please use the command again.");
+      return;
+    }
+
+    // Extract text from original command
+    const commandMatch = originalMessage.text.match(/^\/trans\s+(.+)$/);
+    const textToTranslate = commandMatch ? commandMatch[1].trim() : null;
+
+    if (!textToTranslate) {
+      await ctx.editMessageText("⚠️ Could not extract text to translate. Please use `/trans <text> | <lang>` format.", {
+        parse_mode: "Markdown",
+      });
+      return;
+    }
+
+    try {
+      await ctx.editMessageText("🔄 Translating...");
+
+      const { translatedText, detectedLang } = await translateText(textToTranslate, targetLang);
+      const sourceLangName = getLanguageName(detectedLang);
+      const targetLangName = getLanguageName(targetLang);
+
+      const responseMessage = [
+        `🌐 *Translation*`,
+        ``,
+        `📝 ${translatedText}`,
+        ``,
+        `_${sourceLangName} → ${targetLangName}_`,
+      ].join("\n");
+
+      await ctx.editMessageText(responseMessage, {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "🇬🇧 EN", callback_data: "trans_en" },
+              { text: "🇰🇷 KO", callback_data: "trans_ko" },
+              { text: "🇯🇵 JA", callback_data: "trans_ja" },
+              { text: "🇨🇳 ZH", callback_data: "trans_zh" },
+            ],
+          ],
+        },
+      });
+    } catch (error) {
+      console.error("Translation error:", error);
+      await ctx.editMessageText("❌ Translation failed. Please try again.");
+    }
+  },
+
+  // Quick translate buttons on result message
+  "/trans_quick_(en|ko|ja|zh)/": async ({ ctx }) => {
+    const targetLang = ctx.match[1];
+    const messageText = ctx.callbackQuery.message.text;
+
+    // Extract the translated text from the previous result
+    const textMatch = messageText.match(/📝 (.+?)(?:\n|$)/);
+    if (!textMatch) {
+      await ctx.answerCbQuery("Could not find text to translate");
+      return;
+    }
+
+    const textToTranslate = textMatch[1].trim();
+
+    try {
+      const { translatedText, detectedLang } = await translateText(textToTranslate, targetLang);
+      const sourceLangName = getLanguageName(detectedLang);
+      const targetLangName = getLanguageName(targetLang);
+
+      const responseMessage = [
+        `🌐 *Translation*`,
+        ``,
+        `📝 ${translatedText}`,
+        ``,
+        `_${sourceLangName} → ${targetLangName}_`,
+      ].join("\n");
+
+      await ctx.editMessageText(responseMessage, {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "🇬🇧 EN", callback_data: "trans_quick_en" },
+              { text: "🇰🇷 KO", callback_data: "trans_quick_ko" },
+              { text: "🇯🇵 JA", callback_data: "trans_quick_ja" },
+              { text: "🇨🇳 ZH", callback_data: "trans_quick_zh" },
+            ],
+          ],
+        },
+      });
+    } catch (error) {
+      console.error("Quick translation error:", error);
+      await ctx.answerCbQuery("Translation failed");
+    }
+  },
 };

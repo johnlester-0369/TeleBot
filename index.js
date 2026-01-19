@@ -4,7 +4,7 @@
  */
 
 import "dotenv/config";
-import { Telegraf } from "telegraf";
+import { Telegraf, Markup } from "telegraf";
 import { message } from "telegraf/filters";
 import { readdir } from "fs/promises";
 import { fileURLToPath } from "url";
@@ -24,6 +24,7 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 // Storage for loaded modules
 const loadedCommands = [];
 const loadedEvents = [];
+const loadedActions = [];
 
 /**
  * Checks if the current chat is a group or supergroup
@@ -78,12 +79,13 @@ async function loadCommands() {
           continue;
         }
 
-        const { config, onStart, onChat } = commandModule;
+        const { config, onStart, onChat, actions } = commandModule;
 
         loadedCommands.push({
           config,
           onStart,
           onChat,
+          actions,
           file,
         });
 
@@ -175,10 +177,40 @@ function registerCommands() {
         // Extract command arguments
         const args = getCommandArgs(ctx);
 
-        // Execute the command handler
-        await cmd.onStart({ ctx, args, getCommands });
+        // Execute the command handler with Markup utility
+        await cmd.onStart({ ctx, args, getCommands, Markup });
       });
       console.log(`Registered command: /${cmd.config.name}`);
+    }
+  }
+}
+
+/**
+ * Registers all loaded callback actions with the bot
+ */
+function registerActions() {
+  for (const cmd of loadedCommands) {
+    if (cmd.actions && typeof cmd.actions === "object") {
+      for (const [pattern, handler] of Object.entries(cmd.actions)) {
+        // Support both string patterns and regex patterns
+        const actionPattern = pattern.startsWith("/") && pattern.endsWith("/")
+          ? new RegExp(pattern.slice(1, -1))
+          : pattern;
+
+        bot.action(actionPattern, async (ctx) => {
+          try {
+            await handler({ ctx, Markup, getCommands });
+            // Always answer callback query to hide loading spinner
+            await ctx.answerCbQuery().catch(() => {});
+          } catch (error) {
+            console.error(`Error in action ${pattern}:`, error.message);
+            await ctx.answerCbQuery("An error occurred").catch(() => {});
+          }
+        });
+
+        loadedActions.push({ pattern, commandName: cmd.config.name });
+        console.log(`Registered action: ${pattern} (${cmd.config.name})`);
+      }
     }
   }
 }
@@ -246,6 +278,7 @@ async function main() {
 
   // Register handlers with bot
   registerCommands();
+  registerActions();
   registerEvents();
 
   // Register commands with Telegram
@@ -254,6 +287,7 @@ async function main() {
   // Launch bot
   await bot.launch();
   console.log("Bot is up and running...");
+  console.log(`Loaded: ${loadedCommands.length} commands, ${loadedEvents.length} events, ${loadedActions.length} actions`);
 
   // Graceful shutdown
   process.once("SIGINT", () => bot.stop("SIGINT"));

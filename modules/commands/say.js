@@ -1,6 +1,6 @@
 /**
  * Say command module
- * Converts text to speech using Google TTS
+ * Converts text to speech using Google TTS with language quick-select buttons
  */
 
 import axios from "axios";
@@ -116,6 +116,21 @@ const SUPPORTED_LANGUAGES = {
 };
 
 /**
+ * Popular languages for quick TTS selection
+ */
+const POPULAR_TTS_LANGUAGES = [
+  { code: "en", name: "English", flag: "🇬🇧" },
+  { code: "ko", name: "Korean", flag: "🇰🇷" },
+  { code: "ja", name: "Japanese", flag: "🇯🇵" },
+  { code: "zh", name: "Chinese", flag: "🇨🇳" },
+  { code: "es", name: "Spanish", flag: "🇪🇸" },
+  { code: "fr", name: "French", flag: "🇫🇷" },
+  { code: "de", name: "German", flag: "🇩🇪" },
+  { code: "ru", name: "Russian", flag: "🇷🇺" },
+  { code: "pt", name: "Portuguese", flag: "🇵🇹" },
+];
+
+/**
  * Validates if a language code is supported
  * @param {string} langCode - Language code to validate
  * @returns {boolean} True if language code is supported
@@ -188,6 +203,25 @@ function parseSayArgs(args) {
   };
 }
 
+/**
+ * Builds language selection keyboard for TTS
+ * @returns {object} Inline keyboard markup
+ */
+function buildTTSLanguageKeyboard() {
+  const rows = [];
+
+  // Split popular languages into rows of 3
+  for (let i = 0; i < POPULAR_TTS_LANGUAGES.length; i += 3) {
+    const row = POPULAR_TTS_LANGUAGES.slice(i, i + 3).map((lang) => ({
+      text: `${lang.flag} ${lang.code.toUpperCase()}`,
+      callback_data: `say_${lang.code}`,
+    }));
+    rows.push(row);
+  }
+
+  return { inline_keyboard: rows };
+}
+
 export const config = {
   name: "say",
   description: "Convert text to speech audio",
@@ -200,8 +234,9 @@ export const config = {
  * @param {object} params - Command parameters
  * @param {object} params.ctx - Telegraf context object
  * @param {string} params.args - Command arguments
+ * @param {object} params.Markup - Telegraf Markup utility
  */
-export const onStart = async ({ ctx, args }) => {
+export const onStart = async ({ ctx, args, Markup }) => {
   try {
     const { text: parsedText, targetLang } = parseSayArgs(args);
 
@@ -216,31 +251,44 @@ export const onStart = async ({ ctx, args }) => {
         null;
     }
 
-    // Validate: text must be provided
+    // Validate: text must be provided - show usage with language picker
     if (!textToSpeak) {
       const usageMessage = [
-        "🔊 *Text-to-Speech Command Usage:*",
+        "🔊 *Text-to-Speech Command*",
         "",
+        "*Usage:*",
         "• `/say <text> | <lang>` - Speak in specified language",
         "• `/say <text>` - Speak in English",
-        "• Reply to a message with `/say | <lang>` - Speak replied message",
-        "• Reply to a message with `/say` - Speak in English",
+        "• Reply to a message with `/say | <lang>`",
         "",
         "*Examples:*",
         "• `/say Hello world | en`",
         "• `/say 안녕하세요 | ko`",
-        "• `/say Bonjour | fr`",
         "",
-        "*Common language codes:*",
-        "`en` English | `ko` Korean | `ja` Japanese",
-        "`zh` Chinese | `vi` Vietnamese | `th` Thai",
-        "`fr` French | `de` German | `es` Spanish",
-        "`ru` Russian | `ar` Arabic | `hi` Hindi",
+        "*Note:* Max 200 characters per request.",
       ].join("\n");
 
       await ctx.reply(usageMessage, {
         reply_to_message_id: ctx.message.message_id,
         parse_mode: "Markdown",
+      });
+      return;
+    }
+
+    // If text provided without language, show language picker
+    if (args && !args.includes("|")) {
+      const selectMessage = [
+        `🔊 *Select Voice Language*`,
+        ``,
+        `📝 Text: "${textToSpeak.length > 50 ? textToSpeak.substring(0, 50) + "..." : textToSpeak}"`,
+        ``,
+        `_Choose a language for the voice:_`,
+      ].join("\n");
+
+      await ctx.reply(selectMessage, {
+        reply_to_message_id: ctx.message.message_id,
+        parse_mode: "Markdown",
+        reply_markup: buildTTSLanguageKeyboard(),
       });
       return;
     }
@@ -292,6 +340,18 @@ export const onStart = async ({ ctx, args }) => {
         ? `${textToSpeak.substring(0, 80)}...`
         : textToSpeak;
 
+    // Build quick language buttons for re-speaking
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback("🇬🇧", `say_quick_en`),
+        Markup.button.callback("🇰🇷", `say_quick_ko`),
+        Markup.button.callback("🇯🇵", `say_quick_ja`),
+        Markup.button.callback("🇨🇳", `say_quick_zh`),
+        Markup.button.callback("🇫🇷", `say_quick_fr`),
+        Markup.button.callback("🇪🇸", `say_quick_es`),
+      ],
+    ]);
+
     // Send the audio as voice message
     await ctx.replyWithVoice(
       Input.fromBuffer(audioBuffer, `tts_${Date.now()}.mp3`),
@@ -299,6 +359,7 @@ export const onStart = async ({ ctx, args }) => {
         caption: `🔊 "${displayText}"\n_${langName}_`,
         parse_mode: "Markdown",
         reply_to_message_id: ctx.message.message_id,
+        ...keyboard,
       }
     );
 
@@ -329,4 +390,126 @@ export const onStart = async ({ ctx, args }) => {
       reply_to_message_id: ctx.message.message_id,
     });
   }
+};
+
+/**
+ * Callback action handlers for TTS language buttons
+ */
+export const actions = {
+  // Handle language selection from picker
+  "/say_(en|ko|ja|zh|es|fr|de|ru|pt)/": async ({ ctx }) => {
+    const targetLang = ctx.match[1];
+    
+    // Get the original message that triggered this
+    const originalMessage = ctx.callbackQuery.message.reply_to_message;
+    if (!originalMessage?.text) {
+      await ctx.editMessageText("⚠️ Could not find the original text. Please use the command again.");
+      return;
+    }
+
+    // Extract text from original command
+    const commandMatch = originalMessage.text.match(/^\/say\s+(.+)$/);
+    const textToSpeak = commandMatch ? commandMatch[1].trim() : null;
+
+    if (!textToSpeak) {
+      await ctx.editMessageText("⚠️ Could not extract text. Please use `/say <text> | <lang>` format.", {
+        parse_mode: "Markdown",
+      });
+      return;
+    }
+
+    // Validate length
+    if (textToSpeak.length > 200) {
+      await ctx.editMessageText("⚠️ Text is too long (max 200 characters).");
+      return;
+    }
+
+    try {
+      await ctx.editMessageText("🔄 Generating audio...");
+
+      const audioBuffer = await generateTTSAudio(textToSpeak, targetLang);
+      const langName = getLanguageName(targetLang);
+      const displayText = textToSpeak.length > 80 ? `${textToSpeak.substring(0, 80)}...` : textToSpeak;
+
+      // Delete the "generating" message and send voice
+      try {
+        await ctx.deleteMessage();
+      } catch {
+        // Ignore
+      }
+
+      await ctx.replyWithVoice(
+        Input.fromBuffer(audioBuffer, `tts_${Date.now()}.mp3`),
+        {
+          caption: `🔊 "${displayText}"\n_${langName}_`,
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "🇬🇧", callback_data: "say_quick_en" },
+                { text: "🇰🇷", callback_data: "say_quick_ko" },
+                { text: "🇯🇵", callback_data: "say_quick_ja" },
+                { text: "🇨🇳", callback_data: "say_quick_zh" },
+                { text: "🇫🇷", callback_data: "say_quick_fr" },
+                { text: "🇪🇸", callback_data: "say_quick_es" },
+              ],
+            ],
+          },
+        }
+      );
+    } catch (error) {
+      console.error("TTS generation error:", error);
+      await ctx.editMessageText("❌ Failed to generate audio. Please try again.");
+    }
+  },
+
+  // Quick TTS buttons on voice message (re-speak in different language)
+  "/say_quick_(en|ko|ja|zh|fr|es)/": async ({ ctx }) => {
+    const targetLang = ctx.match[1];
+    const caption = ctx.callbackQuery.message.caption;
+
+    // Extract the text from the caption
+    const textMatch = caption?.match(/🔊 "(.+?)"/);
+    if (!textMatch) {
+      await ctx.answerCbQuery("Could not find text to speak");
+      return;
+    }
+
+    let textToSpeak = textMatch[1].trim();
+    // Remove trailing ... if present
+    if (textToSpeak.endsWith("...")) {
+      textToSpeak = textToSpeak.slice(0, -3);
+    }
+
+    try {
+      await ctx.answerCbQuery("Generating audio...");
+
+      const audioBuffer = await generateTTSAudio(textToSpeak, targetLang);
+      const langName = getLanguageName(targetLang);
+      const displayText = textToSpeak.length > 80 ? `${textToSpeak.substring(0, 80)}...` : textToSpeak;
+
+      await ctx.replyWithVoice(
+        Input.fromBuffer(audioBuffer, `tts_${Date.now()}.mp3`),
+        {
+          caption: `🔊 "${displayText}"\n_${langName}_`,
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "🇬🇧", callback_data: "say_quick_en" },
+                { text: "🇰🇷", callback_data: "say_quick_ko" },
+                { text: "🇯🇵", callback_data: "say_quick_ja" },
+                { text: "🇨🇳", callback_data: "say_quick_zh" },
+                { text: "🇫🇷", callback_data: "say_quick_fr" },
+                { text: "🇪🇸", callback_data: "say_quick_es" },
+              ],
+            ],
+          },
+        }
+      );
+    } catch (error) {
+      console.error("Quick TTS error:", error);
+      await ctx.answerCbQuery("TTS generation failed");
+    }
+  },
 };
