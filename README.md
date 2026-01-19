@@ -1,13 +1,14 @@
 # TeleBot
 
-A modular Telegram bot built with [Telegraf](https://telegraf.js.org/) featuring commands, event handlers, and middleware support.
+A modular Telegram bot built with [Telegraf](https://telegraf.js.org/) featuring commands, event handlers, inline keyboard buttons, and middleware support.
 
 ## ✨ Features
 
 - **Modular Architecture** — Commands and events are separate modules, easy to add or remove
-- **QR Code Generator** — Generate QR codes from any text or URL
-- **Text-to-Speech** — Convert text to audio in 100+ languages
-- **Translation** — Translate text between 100+ languages
+- **Inline Keyboard Buttons** — Interactive buttons on command responses
+- **QR Code Generator** — Generate QR codes from any text or URL with size options
+- **Text-to-Speech** — Convert text to audio in 100+ languages with quick language selection
+- **Translation** — Translate text between 100+ languages with language picker
 - **Group Management** — Admin commands for group settings
 - **User Information** — Retrieve Telegram user IDs and info
 - **Event Handling** — Welcome/farewell messages for group members
@@ -55,15 +56,15 @@ A modular Telegram bot built with [Telegraf](https://telegraf.js.org/) featuring
 
 ### Available Everywhere (Private & Group Chats)
 
-| Command | Description | Usage |
-|---------|-------------|-------|
-| `/start` | Start the bot and receive a welcome message | `/start` |
-| `/help` | Display list of available commands | `/help` |
-| `/uid` | Get your Telegram user ID and info | `/uid` |
-| `/qr` | Generate a QR code from text | `/qr https://example.com` |
-| `/say` | Convert text to speech audio | `/say Hello world \| en` |
-| `/trans` | Translate text to another language | `/trans Bonjour \| en` |
-| `/system` | View bot system information | `/system` |
+| Command | Description | Features |
+|---------|-------------|----------|
+| `/start` | Start the bot | Quick action buttons for all features |
+| `/help` | Display commands | Filter by category (All/Private/Group) |
+| `/uid` | Get your Telegram ID | Refresh, show chat info buttons |
+| `/qr` | Generate QR code | Size selection (Small/Medium/Large) |
+| `/say` | Text to speech | Language picker with 9 popular options |
+| `/trans` | Translate text | Language picker with 12 popular options |
+| `/system` | Bot system info | Refresh, simple/detailed view toggle |
 
 ### Group Only Commands
 
@@ -78,21 +79,22 @@ A modular Telegram bot built with [Telegraf](https://telegraf.js.org/) featuring
 /qr https://telegram.org
 /qr Hello, scan this QR code!
 ```
+*Use buttons to change QR code size!*
 
 **Text-to-Speech:**
 ```
-/say Hello world              → English (default)
-/say 안녕하세요 | ko            → Korean
-/say Bonjour | fr             → French
+/say Hello world              → Shows language picker
+/say 안녕하세요 | ko            → Korean directly
+/say Bonjour | fr             → French directly
 ```
-*Reply to a message with `/say | ko` to speak the replied message in Korean.*
+*Use the flag buttons to quickly hear in different languages!*
 
 **Translation:**
 ```
 /trans Hello | ko             → Translate to Korean
-/trans Bonjour                → Translate to English (default)
+/trans Bonjour                → Shows language picker
 ```
-*Reply to a message with `/trans | ja` to translate the replied message to Japanese.*
+*Use the flag buttons to quickly translate to different languages!*
 
 ### Supported Languages
 
@@ -112,15 +114,15 @@ Common language codes for `/say` and `/trans`:
 TeleBot/
 ├── modules/
 │   ├── commands/          # Bot commands
-│   │   ├── help.js        # /help - List commands
+│   │   ├── help.js        # /help - List commands with filter buttons
 │   │   ├── logger.js      # Middleware - Log all updates
-│   │   ├── qr.js          # /qr - QR code generator
-│   │   ├── say.js         # /say - Text-to-speech
+│   │   ├── qr.js          # /qr - QR code generator with size options
+│   │   ├── say.js         # /say - Text-to-speech with language picker
 │   │   ├── setgroupname.js # /setgroupname - Rename group
-│   │   ├── start.js       # /start - Welcome message
-│   │   ├── system.js      # /system - Bot system info
-│   │   ├── trans.js       # /trans - Translation
-│   │   └── uid.js         # /uid - User ID info
+│   │   ├── start.js       # /start - Welcome with quick action buttons
+│   │   ├── system.js      # /system - Bot system info with refresh
+│   │   ├── trans.js       # /trans - Translation with language picker
+│   │   └── uid.js         # /uid - User ID info with chat info option
 │   └── events/            # Event handlers
 │       ├── join.js        # Welcome new members
 │       └── leave.js       # Farewell leaving members
@@ -143,14 +145,33 @@ TeleBot/
      permission: "user", // "user" = everywhere, "group" = groups only
    };
 
-   export const onStart = async ({ ctx, args }) => {
+   export const onStart = async ({ ctx, args, Markup }) => {
+     const keyboard = Markup.inlineKeyboard([
+       [Markup.button.callback("🔄 Ping Again", "ping_again")],
+     ]);
+
      await ctx.reply("🏓 Pong!", {
        reply_to_message_id: ctx.message.message_id,
+       ...keyboard,
      });
+   };
+
+   // Optional: Define callback action handlers
+   export const actions = {
+     ping_again: async ({ ctx }) => {
+       const latency = Date.now() - ctx.callbackQuery.message.date * 1000;
+       await ctx.editMessageText(`🏓 Pong! Latency: ${latency}ms`, {
+         reply_markup: {
+           inline_keyboard: [
+             [{ text: "🔄 Ping Again", callback_data: "ping_again" }],
+           ],
+         },
+       });
+     },
    };
    ```
 
-2. Restart the bot — the command is auto-loaded!
+2. Restart the bot — the command and actions are auto-loaded!
 
 ### Command Module Structure
 
@@ -161,14 +182,30 @@ TeleBot/
 | `config.permission` | `string` | ✅ | `"user"` or `"group"` |
 | `onStart` | `function` | ⚠️ | Command handler (required for commands) |
 | `onChat` | `function` | ⚠️ | Middleware handler (runs on every message) |
+| `actions` | `object` | ❌ | Callback action handlers for inline buttons |
 
 ### Handler Parameters
 
 ```javascript
-export const onStart = async ({ ctx, args, getCommands }) => {
+export const onStart = async ({ ctx, args, getCommands, Markup }) => {
   // ctx        - Telegraf context object
   // args       - Text after the command (e.g., "/cmd hello" → "hello")
   // getCommands - Function returning all loaded commands (for /help)
+  // Markup     - Telegraf Markup utility for building keyboards
+};
+
+export const actions = {
+  action_name: async ({ ctx, Markup, getCommands }) => {
+    // ctx        - Telegraf callback query context
+    // Markup     - Telegraf Markup utility
+    // getCommands - Function returning all loaded commands
+    // ctx.answerCbQuery() is called automatically after handler
+  },
+  
+  // Supports regex patterns (wrap in slashes)
+  "/pattern_(\\w+)/": async ({ ctx }) => {
+    const matched = ctx.match[1]; // Access captured groups
+  },
 };
 ```
 
@@ -232,6 +269,7 @@ The bot includes comprehensive error handling:
 - API failures return user-friendly error messages
 - Rate limiting is handled gracefully
 - All errors are logged to console
+- Callback queries always receive a response
 
 ## 🔐 Security Notes
 
@@ -239,3 +277,4 @@ The bot includes comprehensive error handling:
 - No sensitive data is logged or stored
 - Input validation on all commands
 - Rate limiting considerations for external APIs
+- Callback data is validated before processing
