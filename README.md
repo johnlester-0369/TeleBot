@@ -1,104 +1,103 @@
 # TeleBot
 
-A modular Telegram bot built with [Telegraf](https://telegraf.js.org/) featuring commands, event handlers, inline keyboard buttons, and middleware support.
+> A modular Telegram bot built with [Telegraf](https://telegraf.js.org/) — add a command file, restart, done.
 
-## ✨ Features
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
+[![License](https://img.shields.io/badge/license-ISC-blue)](LICENSE)
 
-- **Modular Architecture** — Commands and events are separate modules, easy to add or remove
-- **Inline Keyboard Buttons** — Interactive buttons on command responses
-- **QR Code Generator** — Generate QR codes from any text or URL with size options
-- **Text-to-Speech** — Convert text to audio in 100+ languages with quick language selection
-- **Translation** — Translate text between 100+ languages with language picker
-- **Group Management** — Admin commands for group settings
-- **User Information** — Retrieve Telegram user IDs and info
-- **Event Handling** — Welcome/farewell messages for group members
-- **Logging Middleware** — All incoming updates are logged to console
+Most Telegram bots grow into a single, unmaintainable file. TeleBot solves this by auto-loading commands and events as isolated modules — no registration boilerplate, no core edits required when you extend it.
 
-## 📋 Prerequisites
+## Architecture
+
+```
+    ┌────────────────┐
+    │    Telegram    │
+    │     Users      │
+    └───────┬────────┘
+            │
+            ▼
+    ┌────────────────┐
+    │  Telegram API  │
+    └───────┬────────┘
+            │
+            ▼
+    ┌────────────────┐
+    │    TeleBot     │
+    │   (index.js)   │
+    └────────────────┘
+```
+
+`index.js` reads `modules/commands/` and `modules/events/` at startup, registers every valid module with Telegraf, and wires inline keyboard actions automatically. External APIs are called on-demand by individual command modules.
+
+## Prerequisites
 
 - [Node.js](https://nodejs.org/) v18.0.0 or higher
 - A Telegram Bot Token from [@BotFather](https://t.me/BotFather)
 
-## 🚀 Installation
+## Quick Start
 
-1. **Clone the repository**
+```bash
+git clone https://github.com/johnlester-0369/TeleBot.git
+cd TeleBot
+npm install
+cp .env.example .env
+```
 
-   ```bash
-   git clone https://github.com/johnlester-0369/TeleBot.git
-   cd TeleBot
-   ```
+Edit `.env` and set your token:
 
-2. **Install dependencies**
+```
+BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN_HERE
+```
 
-   ```bash
-   npm install
-   ```
+```bash
+npm start
+```
 
-3. **Configure environment variables**
+Open Telegram, message your bot, and type `/start`.
 
-   ```bash
-   cp .env.example .env
-   ```
-
-   Edit `.env` and add your bot token:
-
-   ```
-   BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN_HERE
-   ```
-
-4. **Start the bot**
-
-   ```bash
-   npm start
-   ```
-
-## 🤖 Commands
+## Commands
 
 ### Available Everywhere (Private & Group Chats)
 
 | Command | Description | Features |
 |---------|-------------|----------|
 | `/start` | Start the bot | Quick action buttons for all features |
-| `/help` | Display commands | Filter by category (All/Private/Group) |
+| `/help` | Display commands | Filter by category (All / Private / Group) |
 | `/uid` | Get your Telegram ID | Refresh, show chat info buttons |
-| `/qr` | Generate QR code | Size selection (Small/Medium/Large) |
+| `/qr` | Generate QR code | Size selection (Small / Medium / Large) |
 | `/say` | Text to speech | Language picker with 9 popular options |
 | `/trans` | Translate text | Language picker with 12 popular options |
-| `/system` | Bot system info | Refresh, simple/detailed view toggle |
+| `/system` | Bot system info | Refresh, simple / detailed view toggle |
 
-### Group Only Commands
+### Group Only
 
 | Command | Description | Usage |
 |---------|-------------|-------|
 | `/setgroupname` | Change the group name (admin only) | `/setgroupname New Group Name` |
 
-### Command Examples
+### Examples
 
-**QR Code Generation:**
+**QR Code:**
 ```
 /qr https://telegram.org
 /qr Hello, scan this QR code!
 ```
-*Use buttons to change QR code size!*
+Use the size buttons to regenerate at Small / Medium / Large.
 
 **Text-to-Speech:**
 ```
-/say Hello world              → Shows language picker
+/say Hello world              → shows language picker
 /say 안녕하세요 | ko            → Korean directly
 /say Bonjour | fr             → French directly
 ```
-*Use the flag buttons to quickly hear in different languages!*
 
 **Translation:**
 ```
-/trans Hello | ko             → Translate to Korean
-/trans Bonjour                → Shows language picker
+/trans Hello | ko             → translate to Korean
+/trans Bonjour                → shows language picker
 ```
-*Use the flag buttons to quickly translate to different languages!*
 
 ### Supported Languages
-
-Common language codes for `/say` and `/trans`:
 
 | Code | Language | Code | Language | Code | Language |
 |------|----------|------|----------|------|----------|
@@ -108,151 +107,138 @@ Common language codes for `/say` and `/trans`:
 | `ru` | Russian | `ar` | Arabic | `hi` | Hindi |
 | `fil` | Filipino | `id` | Indonesian | `pt` | Portuguese |
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 TeleBot/
 ├── modules/
-│   ├── commands/          # Bot commands
-│   │   ├── help.js        # /help - List commands with filter buttons
-│   │   ├── logger.js      # Middleware - Log all updates
-│   │   ├── qr.js          # /qr - QR code generator with size options
-│   │   ├── say.js         # /say - Text-to-speech with language picker
-│   │   ├── setgroupname.js # /setgroupname - Rename group
-│   │   ├── start.js       # /start - Welcome with quick action buttons
-│   │   ├── system.js      # /system - Bot system info with refresh
-│   │   ├── trans.js       # /trans - Translation with language picker
-│   │   └── uid.js         # /uid - User ID info with chat info option
-│   └── events/            # Event handlers
-│       ├── join.js        # Welcome new members
-│       └── leave.js       # Farewell leaving members
-├── .env.example           # Environment variables template
-├── index.js               # Main entry point
-├── package.json           # Dependencies and scripts
-└── README.md              # This file
+│   ├── commands/           # Bot commands (auto-loaded at startup)
+│   │   ├── help.js         # /help — list commands with filter buttons
+│   │   ├── logger.js       # Middleware — log all updates
+│   │   ├── qr.js           # /qr — QR code generator with size options
+│   │   ├── say.js          # /say — text-to-speech with language picker
+│   │   ├── setgroupname.js # /setgroupname — rename group (admin only)
+│   │   ├── start.js        # /start — welcome with quick action buttons
+│   │   ├── system.js       # /system — bot system info with refresh
+│   │   ├── trans.js        # /trans — translation with language picker
+│   │   └── uid.js          # /uid — user ID info with chat info option
+│   └── events/             # Event handlers (auto-loaded at startup)
+│       ├── join.js         # Welcome new members
+│       └── leave.js        # Farewell leaving members
+├── .env.example            # Environment variables template
+├── index.js                # Entry point — loads and wires all modules
+├── package.json            # Dependencies and scripts
+└── README.md
 ```
 
-## 🔧 Adding New Commands
+## Adding Commands
 
-1. Create a new file in `modules/commands/`:
+1. Create a file in `modules/commands/`:
 
-   ```javascript
-   // modules/commands/ping.js
+```javascript
+// modules/commands/ping.js
 
-   export const config = {
-     name: "ping",
-     description: "Check if bot is responsive",
-     permission: "user", // "user" = everywhere, "group" = groups only
-   };
+export const config = {
+  name: "ping",
+  description: "Check if bot is responsive",
+  permission: "user",   // "user" = everywhere, "group" = groups only
+};
 
-   export const onStart = async ({ ctx, args, Markup }) => {
-     const keyboard = Markup.inlineKeyboard([
-       [Markup.button.callback("🔄 Ping Again", "ping_again")],
-     ]);
+export const onStart = async ({ ctx, args, Markup }) => {
+  const keyboard = Markup.inlineKeyboard([
+    [Markup.button.callback("🔄 Ping Again", "ping_again")],
+  ]);
 
-     await ctx.reply("🏓 Pong!", {
-       reply_to_message_id: ctx.message.message_id,
-       ...keyboard,
-     });
-   };
+  await ctx.reply("🏓 Pong!", {
+    reply_to_message_id: ctx.message.message_id,
+    ...keyboard,
+  });
+};
 
-   // Optional: Define callback action handlers
-   export const actions = {
-     ping_again: async ({ ctx }) => {
-       const latency = Date.now() - ctx.callbackQuery.message.date * 1000;
-       await ctx.editMessageText(`🏓 Pong! Latency: ${latency}ms`, {
-         reply_markup: {
-           inline_keyboard: [
-             [{ text: "🔄 Ping Again", callback_data: "ping_again" }],
-           ],
-         },
-       });
-     },
-   };
-   ```
+// Optional: define callback action handlers for inline buttons
+export const actions = {
+  ping_again: async ({ ctx }) => {
+    const latency = Date.now() - ctx.callbackQuery.message.date * 1000;
+    await ctx.editMessageText(`🏓 Pong! Latency: ${latency}ms`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔄 Ping Again", callback_data: "ping_again" }],
+        ],
+      },
+    });
+  },
+};
+```
 
-2. Restart the bot — the command and actions are auto-loaded!
+2. Restart the bot — the command and its actions are auto-loaded.
 
-### Command Module Structure
+### Module Export Contract
 
 | Export | Type | Required | Description |
 |--------|------|----------|-------------|
 | `config.name` | `string` | ✅ | Command name (without `/`) |
-| `config.description` | `string` | ✅ | Short description for `/help` |
+| `config.description` | `string` | ✅ | Short description shown in `/help` |
 | `config.permission` | `string` | ✅ | `"user"` or `"group"` |
 | `onStart` | `function` | ⚠️ | Command handler (required for commands) |
-| `onChat` | `function` | ⚠️ | Middleware handler (runs on every message) |
-| `actions` | `object` | ❌ | Callback action handlers for inline buttons |
+| `onChat` | `function` | ⚠️ | Middleware handler — runs on every message |
+| `actions` | `object` | ❌ | Callback handlers for inline buttons |
 
 ### Handler Parameters
 
 ```javascript
 export const onStart = async ({ ctx, args, getCommands, Markup }) => {
-  // ctx        - Telegraf context object
-  // args       - Text after the command (e.g., "/cmd hello" → "hello")
-  // getCommands - Function returning all loaded commands (for /help)
-  // Markup     - Telegraf Markup utility for building keyboards
+  // ctx         — Telegraf context object
+  // args        — text after the command ("/cmd hello" → "hello")
+  // getCommands — returns all loaded command configs (used by /help)
+  // Markup      — Telegraf Markup utility for building keyboards
 };
 
 export const actions = {
   action_name: async ({ ctx, Markup, getCommands }) => {
-    // ctx        - Telegraf callback query context
-    // Markup     - Telegraf Markup utility
-    // getCommands - Function returning all loaded commands
-    // ctx.answerCbQuery() is called automatically after handler
+    // ctx.answerCbQuery() is called automatically after this handler
   },
-  
-  // Supports regex patterns (wrap in slashes)
+
+  // Regex patterns are supported — wrap in forward slashes
   "/pattern_(\\w+)/": async ({ ctx }) => {
-    const matched = ctx.match[1]; // Access captured groups
+    const matched = ctx.match[1]; // access captured groups
   },
 };
 ```
 
-## 📡 Adding New Events
+## Adding Events
 
-1. Create a new file in `modules/events/`:
+1. Create a file in `modules/events/`:
 
-   ```javascript
-   // modules/events/photo.js
+```javascript
+// modules/events/photo.js
 
-   export const config = {
-     name: "photo",
-     description: "Handle photo messages",
-     eventType: ["photo"], // Telegraf message filter types
-   };
+export const config = {
+  name: "photo",
+  description: "Handle photo messages",
+  eventType: ["photo"],   // Telegraf message filter types
+};
 
-   export const onStart = async ({ ctx }) => {
-     await ctx.reply("Nice photo! 📸");
-   };
-   ```
+export const onStart = async ({ ctx }) => {
+  await ctx.reply("Nice photo! 📸");
+};
+```
 
-2. Restart the bot — the event handler is auto-loaded!
+2. Restart the bot — the event handler is auto-loaded.
 
 ### Supported Event Types
 
-Common `eventType` values (from Telegraf filters):
+`text` · `photo` · `video` · `document` · `sticker` · `voice` · `audio` · `new_chat_members` · `left_chat_member`
 
-- `text` — Text messages
-- `photo` — Photos
-- `video` — Videos
-- `document` — Files/documents
-- `sticker` — Stickers
-- `voice` — Voice messages
-- `audio` — Audio files
-- `new_chat_members` — Users joining group
-- `left_chat_member` — User leaving group
-
-## 🛡️ Permissions
+## Permissions
 
 | Permission | Private Chat | Group Chat |
 |------------|--------------|------------|
 | `"user"` | ✅ Works | ✅ Works |
 | `"group"` | ❌ Ignored | ✅ Works |
 
-## 📝 Logging
+## Logging
 
-All incoming updates are automatically logged to console by the logger middleware:
+All incoming updates are logged automatically by the logger middleware:
 
 ```
 [COMMAND] from @username: /help
@@ -261,20 +247,16 @@ All incoming updates are automatically logged to console by the logger middlewar
 [NEW_CHAT_MEMBERS] from @username: <new_chat_members>
 ```
 
-## ⚠️ Error Handling
-
-The bot includes comprehensive error handling:
+## Error Handling
 
 - Invalid command arguments show usage instructions
 - API failures return user-friendly error messages
-- Rate limiting is handled gracefully
 - All errors are logged to console
 - Callback queries always receive a response
 
-## 🔐 Security Notes
+## Security
 
-- Bot token is stored in `.env` (never commit this file)
+- Bot token is stored in `.env` — never commit this file
 - No sensitive data is logged or stored
 - Input validation on all commands
-- Rate limiting considerations for external APIs
 - Callback data is validated before processing
